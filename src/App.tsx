@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import type * as THREE from 'three'; // 型定義のために追加
 import { SimulatorView } from './components/SimulatorView';
 import { RobotCameraView } from './components/RobotCameraView';
 import { DebugLog } from './components/DebugLog';
@@ -6,6 +7,9 @@ import { Info, Moon, Sun } from 'lucide-react';
 
 export default function App() {
   const [darkMode, setDarkMode] = useState(false);
+  
+  // ★追加: SimulatorViewからシーンを受け取り、RobotCameraViewへ渡すためのState
+  const [sharedScene, setSharedScene] = useState<THREE.Scene | null>(null);
 
   // ダークモードの適用
   useEffect(() => {
@@ -50,14 +54,16 @@ export default function App() {
       <main className="flex-1 flex flex-col md:flex-row gap-4 p-4 min-h-0">
         {/* 左側：メインシミュレータビュー - より正方形寄りに */}
         <div className="flex-1 md:max-w-[60%] flex flex-col min-h-0 min-w-0">
-          <SimulatorView />
+          {/* ★修正: シーンができたら sharedScene にセットするコールバックを渡す */}
+          <SimulatorView onSceneReady={setSharedScene} />
         </div>
 
         {/* 右側：カメラビュー & デバッグログ */}
         <aside className="flex flex-col md:flex-1 gap-4 min-h-0">
           {/* ロボットカメラビュー - 比率を上げる */}
           <div className="flex-[1.5] min-h-[250px] md:min-h-[320px]">
-            <RobotCameraView />
+            {/* ★修正: 共有されたシーンを渡す */}
+            <RobotCameraView scene={sharedScene} />
           </div>
 
           {/* デバッグログ */}
