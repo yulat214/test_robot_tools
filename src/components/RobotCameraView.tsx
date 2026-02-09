@@ -67,15 +67,12 @@ export function RobotCameraView({ scene }: RobotCameraViewProps) {
                     camera.position.copy(targetPos);
                     camera.quaternion.copy(targetQuat);
                     
-                    // 【補正】カメラの向きを調整
-                    // URDFの座標系とカメラの座標系（-Z方向を見る）が合わない場合、ここで回転させます。
-                    // 例: X軸方向を向かせたい場合など
                     camera.rotateY(-Math.PI / 2); 
                     // camera.rotateX(-Math.PI / 2);
+                    camera.rotateZ(-Math.PI / 2);
 
                     // 【補正】埋もれる場合は少し前にずらす (ローカル座標系でZ方向に移動)
                     camera.translateZ(-0.1); 
-                    // camera.translateX(0.01);
                 }
 
                 renderer.render(scene, camera);

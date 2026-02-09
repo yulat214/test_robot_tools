@@ -63,7 +63,14 @@ export function SimulatorView({ onSceneReady }: SimulatorViewProps) {
                 clearInterval(checkScene);
                 
                 // 背景色設定
-                viewer.scene.background = new THREE.Color('#b3e0aa');
+                viewer.scene.background = new THREE.Color('#d1d1d1');
+
+                const size = 5;
+                const divisions = 10;
+                const gridHelper = new THREE.GridHelper(size, divisions);
+                gridHelper.raycast = () => {};
+                gridHelper.position.y = -0.001;
+                viewer.scene.add(gridHelper);
 
                 if (viewer.camera) {
                     // 数値が小さいほど近づく
