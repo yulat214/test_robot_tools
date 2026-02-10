@@ -1,7 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type * as THREE from 'three';
-// ▼▼▼ roslibをViteで動くようにインポート ▼▼▼
-import * as ROSLIB from 'roslib';
 
 declare global {
   namespace JSX {
@@ -23,10 +21,7 @@ interface SimulatorViewProps {
 export function SimulatorView({ onSceneReady }: SimulatorViewProps) {
   const viewerRef = useRef<HTMLElement | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
-  // ▼▼▼ ROS接続ステータス管理 ▼▼▼
-  const [rosStatus, setRosStatus] = useState<string>('Disconnected');
 
-  // 1. ビューアーの初期化 (ここは元のコードのまま)
   useEffect(() => {
     const initViewer = async () => {
       try {
@@ -47,37 +42,48 @@ export function SimulatorView({ onSceneReady }: SimulatorViewProps) {
 
         // ローダー設定
         viewer.loadMeshFunc = (path: string, manager: any, done: any) => {
-           
-          // ▼▼▼ サーバー上のメッシュを使用するためのパス書き換え処理 ▼▼▼
+          
+          // ▼▼▼ 追加: サーバー上のメッシュを使用するためのパス書き換え処理 ▼▼▼
           const ASSET_SERVER_URL = 'http://localhost:8000/';
           let resolvedPath = path;
 
+          console.log(`[MeshLoad] Original: ${path}`);
+
           if (path.indexOf('file://') > -1) {
+             // ROSの構成上、必ず /share/パッケージ名/... となっているはず
              const marker = '/share/';
-             const index = path.lastIndexOf(marker);
+             const index = path.lastIndexOf(marker); // 最後の /share/ を探す
              
              if (index > -1) {
+                 // share/ の後ろ（realsense2_description/...）を切り出す
                  const relativePath = path.substring(index + marker.length);
-                 // ※もしメッシュが表示されない場合はここを調整してください
-                 resolvedPath = ASSET_SERVER_URL + "realsense-ros/" + relativePath; 
+                 resolvedPath = ASSET_SERVER_URL + "realsense-ros/" + relativePath;
              }
           }
-          else {
-            resolvedPath = ASSET_SERVER_URL + path;
-          }
+	  else {
+	  	resolvedPath = ASSET_SERVER_URL + path;
+ 	  }
+          console.log(`[MeshLoad] Resolved: ${resolvedPath}`);
 
           const ext = path.split(/\./g).pop()?.toLowerCase();
           switch (ext) {
             case 'gltf': case 'glb': 
+                // new GLTFLoader(manager).load(path, (r: any) => done(r.scene), null, (e: any) => done(null, e)); 
                 new GLTFLoader(manager).load(resolvedPath, (r: any) => done(r.scene), null, (e: any) => done(null, e)); 
                 break;
+
             case 'obj': 
+                // new OBJLoader(manager).load(path, (r: any) => done(r), null, (e: any) => done(null, e)); 
                 new OBJLoader(manager).load(resolvedPath, (r: any) => done(r), null, (e: any) => done(null, e)); 
                 break;
+
             case 'dae': 
+                // new ColladaLoader(manager).load(path, (r: any) => done(r.scene), null, (e: any) => done(null, e)); 
                 new ColladaLoader(manager).load(resolvedPath, (r: any) => done(r.scene), null, (e: any) => done(null, e)); 
                 break;
+
             case 'stl': 
+                // new STLLoader(manager).load(path, (r: any) => {
                 new STLLoader(manager).load(resolvedPath, (r: any) => {
                     const material = new THREE.MeshPhongMaterial();
                     const mesh = new THREE.Mesh(r, material);
@@ -106,14 +112,17 @@ export function SimulatorView({ onSceneReady }: SimulatorViewProps) {
                 viewer.scene.add(gridHelper);
 
                 if (viewer.camera) {
+                    // 数値が小さいほど近づく
                     viewer.camera.position.set(0.4, 0.4, 0.4);
                     viewer.camera.lookAt(0, 0, 0);
 
+                    // OrbitControlsなどを使用している場合、手動変更を反映させるためにupdateが必要な場合があります
                     if (viewer.controls) {
                         viewer.controls.update();
                     }
                 }
 
+                // 親コンポーネントへシーンを渡す
                 if (onSceneReady) {
                     onSceneReady(viewer.scene);
                 }
@@ -130,83 +139,14 @@ export function SimulatorView({ onSceneReady }: SimulatorViewProps) {
     initViewer();
   }, [onSceneReady]);
 
-
-  // 2. ▼▼▼ 修正版: ROS接続とジョイント同期処理 ▼▼▼
-  useEffect(() => {
-    const ros = new ROSLIB.Ros({
-      url: 'ws://localhost:9090'
-    });
-
-    ros.on('connection', () => {
-      console.log('✅ Connected to websocket server.');
-      setRosStatus('Connected');
-    });
-
-    ros.on('error', (error) => {
-      console.error('❌ Error connecting to websocket server: ', error);
-      setRosStatus('Error');
-    });
-
-    ros.on('close', () => {
-      console.log('Connection to websocket server closed.');
-      setRosStatus('Disconnected');
-    });
-
-    const jointListener = new ROSLIB.Topic({
-      ros: ros,
-      name: '/joint_states',
-      messageType: 'sensor_msgs/msg/JointState'
-    });
-
-    // デバッグ用のカウンタ
-    let debugCount = 0;
-
-    jointListener.subscribe((message: any) => {
-      const urdfElement = viewerRef.current as any;
-      if (!urdfElement?.robot?.joints) {
-          return;
-      }
-      // --- 同期処理 ---
-      for (let i = 0; i < message.name.length; i++) {
-         const jointName = message.name[i];
-         const position = message.position[i];
-         
-         // 【修正】 robot.joints から探す
-         if (urdfElement.robot.joints[jointName]) {
-             urdfElement.robot.joints[jointName].setJointValue(position);
-         }
-         // 念のため前方一致検索も入れておく（不要なら削除可）
-         else {
-            const found = Object.keys(urdfElement.robot.joints).find(k => jointName.endsWith(k));
-            if (found) {
-                urdfElement.robot.joints[found].setJointValue(position);
-            }
-         }
-      }
-    });
-
-    return () => {
-        jointListener.unsubscribe();
-        ros.close();
-    };
-  }, []); 
-
-
   return (
-    <div className="h-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden flex flex-col shadow-sm relative">
-      <div className="bg-gray-100 dark:bg-gray-700 px-4 py-2 border-b border-gray-300 dark:border-gray-600 flex-shrink-0 flex justify-between items-center">
+    <div className="h-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden flex flex-col shadow-sm">
+      <div className="bg-gray-100 dark:bg-gray-700 px-4 py-2 border-b border-gray-300 dark:border-gray-600 flex-shrink-0">
         <h2 className="text-sm text-gray-700 dark:text-gray-300">メインシミュレータビュー</h2>
-        
-        {/* ステータス表示 */}
-        <div className="text-xs px-2 py-1 rounded bg-white dark:bg-gray-600 shadow-sm">
-            Status: <span className={rosStatus === 'Connected' ? 'text-green-600 font-bold' : 'text-red-500'}>
-                {rosStatus}
-            </span>
-        </div>
       </div>
       
       <div className="flex-1 relative bg-gray-50 overflow-hidden">
-        {/* メインビューアー */}
+        {/* メインビューアー (操作可能) */}
         <urdf-viewer
           ref={viewerRef}
           up="+Z"
