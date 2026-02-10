@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type * as THREE from 'three';
-// ▼▼▼ roslibをViteで動くようにインポート ▼▼▼
 import * as ROSLIB from 'roslib';
 
 declare global {
@@ -23,21 +22,22 @@ interface SimulatorViewProps {
 export function SimulatorView({ onSceneReady }: SimulatorViewProps) {
   const viewerRef = useRef<HTMLElement | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
-  // ▼▼▼ ROS接続ステータス管理 ▼▼▼
   const [rosStatus, setRosStatus] = useState<string>('Disconnected');
 
-  // 1. ビューアーの初期化 (ここは元のコードのまま)
+  // データ置き場
+  const latestMessageRef = useRef<any>(null);
+
+  // 1. ビューアー初期化 (変更なし)
   useEffect(() => {
     const initViewer = async () => {
       try {
-        // Import Map経由の読み込み
         const THREE = await import(/* @vite-ignore */ 'three') as typeof import('three');
         const { STLLoader } = await import(/* @vite-ignore */ 'three/addons/loaders/STLLoader.js');
         const { GLTFLoader } = await import(/* @vite-ignore */ 'three/addons/loaders/GLTFLoader.js');
         const { ColladaLoader } = await import(/* @vite-ignore */ 'three/addons/loaders/ColladaLoader.js');
         const { OBJLoader } = await import(/* @vite-ignore */ 'three/addons/loaders/OBJLoader.js');
-
         const customElementModule = await import(/* @vite-ignore */ '/src/urdf-loader/urdf-manipulator-element.js');
+        
         if (!customElements.get('urdf-viewer')) {
           customElements.define('urdf-viewer', customElementModule.default);
         }
@@ -45,112 +45,65 @@ export function SimulatorView({ onSceneReady }: SimulatorViewProps) {
         const viewer = viewerRef.current as any;
         if (!viewer) return;
 
-        // ローダー設定
         viewer.loadMeshFunc = (path: string, manager: any, done: any) => {
-           
-          // ▼▼▼ サーバー上のメッシュを使用するためのパス書き換え処理 ▼▼▼
           const ASSET_SERVER_URL = 'http://localhost:8000/';
           let resolvedPath = path;
-
           if (path.indexOf('file://') > -1) {
              const marker = '/share/';
              const index = path.lastIndexOf(marker);
-             
              if (index > -1) {
-                 const relativePath = path.substring(index + marker.length);
-                 // ※もしメッシュが表示されない場合はここを調整してください
-                 resolvedPath = ASSET_SERVER_URL + "realsense-ros/" + relativePath; 
+                 resolvedPath = ASSET_SERVER_URL + "realsense-ros/" + path.substring(index + marker.length);
              }
-          }
-          else {
+          } else {
             resolvedPath = ASSET_SERVER_URL + path;
           }
 
           const ext = path.split(/\./g).pop()?.toLowerCase();
           switch (ext) {
-            case 'gltf': case 'glb': 
-                new GLTFLoader(manager).load(resolvedPath, (r: any) => done(r.scene), null, (e: any) => done(null, e)); 
-                break;
-            case 'obj': 
-                new OBJLoader(manager).load(resolvedPath, (r: any) => done(r), null, (e: any) => done(null, e)); 
-                break;
-            case 'dae': 
-                new ColladaLoader(manager).load(resolvedPath, (r: any) => done(r.scene), null, (e: any) => done(null, e)); 
-                break;
-            case 'stl': 
-                new STLLoader(manager).load(resolvedPath, (r: any) => {
-                    const material = new THREE.MeshPhongMaterial();
-                    const mesh = new THREE.Mesh(r, material);
-                    done(mesh);
-                  }, null, (e: any) => done(null, e)); 
-                break;
+            case 'gltf': case 'glb': new GLTFLoader(manager).load(resolvedPath, (r: any) => done(r.scene), null, (e: any) => done(null, e)); break;
+            case 'obj': new OBJLoader(manager).load(resolvedPath, (r: any) => done(r), null, (e: any) => done(null, e)); break;
+            case 'dae': new ColladaLoader(manager).load(resolvedPath, (r: any) => done(r.scene), null, (e: any) => done(null, e)); break;
+            case 'stl': new STLLoader(manager).load(resolvedPath, (r: any) => {
+                const material = new THREE.MeshPhongMaterial();
+                const mesh = new THREE.Mesh(r, material);
+                done(mesh);
+            }, null, (e: any) => done(null, e)); break;
           }
         };
 
-
         viewer.urdf = 'http://localhost:8000/robot.urdf';
 
-        // シーン準備待機
         const checkScene = setInterval(() => {
             if (viewer.scene) {
                 clearInterval(checkScene);
-                
-                // 背景色設定
                 viewer.scene.background = new THREE.Color('#d1d1d1');
-
-                const size = 5;
-                const divisions = 10;
-                const gridHelper = new THREE.GridHelper(size, divisions);
-                gridHelper.raycast = () => {};
+                const gridHelper = new THREE.GridHelper(5, 10);
                 gridHelper.position.y = -0.001;
                 viewer.scene.add(gridHelper);
-
                 if (viewer.camera) {
                     viewer.camera.position.set(0.4, 0.4, 0.4);
                     viewer.camera.lookAt(0, 0, 0);
-
-                    if (viewer.controls) {
-                        viewer.controls.update();
-                    }
+                    if (viewer.controls) viewer.controls.update();
                 }
-
-                if (onSceneReady) {
-                    onSceneReady(viewer.scene);
-                }
-                
+                if (onSceneReady) onSceneReady(viewer.scene);
                 setIsLoaded(true);
             }
         }, 100);
-
       } catch (error) {
         console.error("Failed to load modules:", error);
       }
     };
-
     initViewer();
   }, [onSceneReady]);
 
 
-  // 2. ▼▼▼ 修正版: ROS接続とジョイント同期処理 ▼▼▼
+  // 2. ROS接続 & 30fps固定更新ループ (確実性重視)
   useEffect(() => {
-    const ros = new ROSLIB.Ros({
-      url: 'ws://localhost:9090'
-    });
+    const ros = new ROSLIB.Ros({ url: 'ws://localhost:9090' });
 
-    ros.on('connection', () => {
-      console.log('✅ Connected to websocket server.');
-      setRosStatus('Connected');
-    });
-
-    ros.on('error', (error) => {
-      console.error('❌ Error connecting to websocket server: ', error);
-      setRosStatus('Error');
-    });
-
-    ros.on('close', () => {
-      console.log('Connection to websocket server closed.');
-      setRosStatus('Disconnected');
-    });
+    ros.on('connection', () => setRosStatus('Connected'));
+    ros.on('error', () => setRosStatus('Error'));
+    ros.on('close', () => setRosStatus('Disconnected'));
 
     const jointListener = new ROSLIB.Topic({
       ros: ros,
@@ -158,34 +111,65 @@ export function SimulatorView({ onSceneReady }: SimulatorViewProps) {
       messageType: 'sensor_msgs/msg/JointState'
     });
 
-    // デバッグ用のカウンタ
-    let debugCount = 0;
-
     jointListener.subscribe((message: any) => {
-      const urdfElement = viewerRef.current as any;
-      if (!urdfElement?.robot?.joints) {
-          return;
-      }
-      // --- 同期処理 ---
-      for (let i = 0; i < message.name.length; i++) {
-         const jointName = message.name[i];
-         const position = message.position[i];
-         
-         // 【修正】 robot.joints から探す
-         if (urdfElement.robot.joints[jointName]) {
-             urdfElement.robot.joints[jointName].setJointValue(position);
-         }
-         // 念のため前方一致検索も入れておく（不要なら削除可）
-         else {
-            const found = Object.keys(urdfElement.robot.joints).find(k => jointName.endsWith(k));
-            if (found) {
-                urdfElement.robot.joints[found].setJointValue(position);
-            }
-         }
-      }
+       latestMessageRef.current = message;
     });
 
+    // ★設定: FPS制限
+    const FPS = 30;
+    const INTERVAL = 1000 / FPS;
+
+    let animationFrameId: number;
+    let lastTime = 0;
+
+    const animate = (currentTime: number) => {
+        animationFrameId = requestAnimationFrame(animate);
+
+        // 時間が経っていなければスキップ (CPU/GPU負荷対策)
+        const delta = currentTime - lastTime;
+        if (delta < INTERVAL) {
+            return;
+        }
+        
+        // 基準時間を更新
+        lastTime = currentTime - (delta % INTERVAL);
+
+        const urdfElement = viewerRef.current as any;
+        const message = latestMessageRef.current;
+
+        // ★修正ポイント:
+        // 条件分岐を最小限にし、「データがあれば必ず適用する」ようにしました。
+        // これで「無視される」現象はなくなります。
+        if (urdfElement?.robot?.joints) {
+            
+            // データがある場合のみ関節更新
+            if (message) {
+                for (let i = 0; i < message.name.length; i++) {
+                    const name = message.name[i];
+                    const position = message.position[i];
+                    
+                    const joint = urdfElement.robot.joints[name];
+                    if (joint) {
+                        // 閾値チェック(IF文)を削除し、無条件で適用
+                        joint.setJointValue(position);
+                    }
+                }
+            }
+
+            // ★強制描画
+            // データ更新の有無にかかわらず 30fps で描画を回すことで、
+            // 「カメラ操作」や「後追いで届いたデータ」も確実に反映させます。
+            if (urdfElement.renderer && urdfElement.scene && urdfElement.camera) {
+                urdfElement.renderer.render(urdfElement.scene, urdfElement.camera);
+            }
+        }
+    };
+
+    // ループ開始
+    animate(0);
+
     return () => {
+        cancelAnimationFrame(animationFrameId);
         jointListener.unsubscribe();
         ros.close();
     };
@@ -196,21 +180,15 @@ export function SimulatorView({ onSceneReady }: SimulatorViewProps) {
     <div className="h-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden flex flex-col shadow-sm relative">
       <div className="bg-gray-100 dark:bg-gray-700 px-4 py-2 border-b border-gray-300 dark:border-gray-600 flex-shrink-0 flex justify-between items-center">
         <h2 className="text-sm text-gray-700 dark:text-gray-300">メインシミュレータビュー</h2>
-        
-        {/* ステータス表示 */}
         <div className="text-xs px-2 py-1 rounded bg-white dark:bg-gray-600 shadow-sm">
-            Status: <span className={rosStatus === 'Connected' ? 'text-green-600 font-bold' : 'text-red-500'}>
-                {rosStatus}
-            </span>
+            Status: <span className={rosStatus === 'Connected' ? 'text-green-600 font-bold' : 'text-red-500'}>{rosStatus}</span>
         </div>
       </div>
       
       <div className="flex-1 relative bg-gray-50 overflow-hidden">
-        {/* メインビューアー */}
         <urdf-viewer
           ref={viewerRef}
           up="+Z"
-          display-shadow
           style={{ width: '100%', height: '100%', display: 'block' }}
         ></urdf-viewer>
 
