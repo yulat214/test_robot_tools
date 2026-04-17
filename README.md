@@ -44,5 +44,10 @@ https://github.com/user-attachments/assets/cc137886-75bb-4efb-8c5d-7c5432c0d9a7
 cd ~/.
 git clone https://github.com/yulat214/test_robot_tools
 cd test_robot_tools
-npm install```
+npm install
+```
 
+---
+Dependency:
+- [https://github.com/gkjohnson/urdf-loaders](https://github.com/gkjohnson/urdf-loaders)
+ロボットモデルの表示に使用しています。
