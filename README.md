@@ -10,7 +10,7 @@ https://github.com/user-attachments/assets/cc137886-75bb-4efb-8c5d-7c5432c0d9a7
 ### 主な機能
 - **Robot Simulator**: 物理エンジンを使用しない、動作確認に特化した軽量 3D レンダラー。
 - **Camera Viewer**: ロボットからの画像トピックをリアルタイムに表示。
-- **Log & Log Analyzer**: 実行ログの表示に加え、LLM 等を活用したエラー分析をサポート。
+- **Log & Log Analyzer**: 実行ログの表示に加え、ログ解析によってエラー分析をサポート。
 - **Web Editor**: Monaco Editor を内蔵し、ブラウザ上で直接スクリプトを編集可能。
 
 ---
