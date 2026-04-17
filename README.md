@@ -27,15 +27,6 @@ https://github.com/user-attachments/assets/cc137886-75bb-4efb-8c5d-7c5432c0d9a7
 
 ---
 
-## 実行時に必要な情報
-- /joint_states: `sensor_msgs/msg/JointState`
-- /rosout: `rcl_interfaces/msg/Log`
-- /cmd_vel: ` geometry_msgs/msg/Twist`
-
-- robot_state_publisherの起動
-
----
-
 ## セットアップ
 リポジトリをクローンし、必要な依存関係をインストールします。
 
@@ -46,6 +37,25 @@ git clone https://github.com/yulat214/test_robot_tools
 cd test_robot_tools
 npm install
 ```
+
+---
+
+## 実行時に必要な情報
+- /joint_states: `sensor_msgs/msg/JointState`
+- /rosout: `rcl_interfaces/msg/Log`
+- /cmd_vel: ` geometry_msgs/msg/Twist`
+
+- robot_state_publisherの起動
+
+---
+
+## 利用方法
+動作確認したいロボットに関するlaunch等によって、上記topicが流れている状態で
+```bash
+cd test_robot_tools
+run npm start
+```
+を実行し、ブラウザから`http://localhost:3000`にアクセス
 
 ---
 Dependency:
