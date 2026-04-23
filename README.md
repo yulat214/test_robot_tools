@@ -42,9 +42,10 @@ npm install
 ---
 
 ## 実行時に必要な情報
+実機のbringup等のlaunchから、ハードウェアとの接続部分を除いた情報で使用可能です。
 - /joint_states: `sensor_msgs/msg/JointState`
 - /rosout: `rcl_interfaces/msg/Log`
-- /cmd_vel: ` geometry_msgs/msg/Twist`
+- /cmd_vel: `geometry_msgs/msg/Twist`
 
 - robot_state_publisherの起動
 
