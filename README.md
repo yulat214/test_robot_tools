@@ -3,8 +3,9 @@
 > ブラウザだけでROS開発を完結させる軽量開発環境
 
 本ツールは、ROS 2 初学者が開発環境の構築や複雑なツールの切り替えに迷うことなく、ロボットの制御とデバッグに集中できるように設計された Web ベースの統合開発環境です。
+<img width="3263" height="1973" alt="2026-04-23-14:18:49-screenshot" src="https://github.com/user-attachments/assets/9528a728-ee5f-437c-af25-db9c99be44b6" />
 
-https://github.com/user-attachments/assets/cc137886-75bb-4efb-8c5d-7c5432c0d9a7
+デモは[こちらの動画](https://youtu.be/tN1MnzoIzKw)をご覧ください。
 
 ---
 ### 主な機能
