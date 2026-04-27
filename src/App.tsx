@@ -55,13 +55,13 @@ export default function App() {
       </nav>
 
       {/* 2. メインコンテンツエリア */}
-      <main className="flex-1 flex flex-col p-4 min-h-0 overflow-hidden">
+      <main className="flex-1 flex flex-col p-4 min-h-0">
         
         {activeTab === 'simulator' ? (
           // === シミュレータモード ===
           <div className="flex-1 flex flex-col md:flex-row gap-4 min-h-0">
             {/* 左側：メインシミュレータビュー */}
-            <div className="flex-1 md:max-w-[60%] flex flex-col min-h-0 min-w-0 bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+            <div className="flex-1 md:max-w-[60%] flex flex-col min-h-0 min-w-0 bg-white rounded-lg border border-gray-200 shadow-sm ">
               <SimulatorView onSceneReady={setSharedScene} />
             </div>
 

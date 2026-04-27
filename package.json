@@ -16,7 +16,8 @@
             "react-dom": "^18.3.1",
             "roslib": "^2.0.1",
             "serve-index": "^1.9.2",
-            "three": "^0.182.0"
+            "three": "^0.182.0",
+            "xml2js": "^0.6.2"
       },
       "devDependencies": {
             "@types/node": "^20.10.0",
@@ -30,7 +31,6 @@
             "dev": "vite --host 0.0.0.0",
             "build": "vite build",
             "serve:ros": "node server/assets-server.js",
-	    "start": "concurrently \"npm run serve:ros\" \"npm run dev\" --names \"SERVER,CLIENT\" -c \"blue,green\""
-
+            "start": "concurrently \"npm run serve:ros\" \"npm run dev\" --names \"SERVER,CLIENT\" -c \"blue,green\""
       }
 }

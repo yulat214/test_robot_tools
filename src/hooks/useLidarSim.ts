@@ -1,0 +1,52 @@
+// src/features/simulator/hooks/useLidarSim.ts
+import { useCallback } from 'react';
+import * as THREE from 'three';
+
+export function useLidarSim() {
+  const raycaster = new THREE.Raycaster();
+
+  const simulateLidar = useCallback((robot: THREE.Object3D, obstacles: THREE.Object3D[]) => {
+    const numRays = 360; // 1度刻み
+    const maxRange = 3.5; 
+    const minRange = 0.12;
+    const ranges: number[] = [];
+
+    // ロボットの現在位置（LiDARの高さに合わせて少しZを上げる）
+    const origin = new THREE.Vector3();
+    robot.getWorldPosition(origin);
+    origin.z += 0.15; 
+
+    for (let i = 0; i < numRays; i++) {
+      const angle = (i * Math.PI) / 180;
+      
+      const direction = new THREE.Vector3(Math.cos(angle), Math.sin(angle), 0);
+      direction.applyQuaternion(robot.quaternion).normalize();
+
+      raycaster.set(origin, direction);
+      raycaster.near = minRange;
+      raycaster.far = maxRange;
+
+      const intersects = raycaster.intersectObjects(obstacles, true);
+
+      if (intersects.length > 0) {
+        ranges.push(intersects[0].distance);
+      } else {
+        ranges.push(0.0);
+      }
+    }
+
+    return {
+      angle_min: 0.0,
+      angle_max: 2.0 * Math.PI,
+      angle_increment: (Math.PI * 2.0) / numRays,
+      time_increment: 0.0,  
+      scan_time: 0.1,       
+      range_min: minRange,
+      range_max: maxRange,
+      ranges: ranges,
+      intensities: []      
+    };
+  }, []);
+
+  return { simulateLidar };
+}
