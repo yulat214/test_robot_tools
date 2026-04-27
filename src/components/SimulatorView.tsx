@@ -1,6 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import type * as THREE from 'three';
-import * as ROSLIB from 'roslib';
+import { useROS } from '../hooks/useROS';
+import { useWorldManager } from '../hooks/useWorldManager'; 
+import { useLidarSim } from '../hooks/useLidarSim';         
 
 declare global {
   namespace JSX {
@@ -20,28 +22,130 @@ interface SimulatorViewProps {
   jointTopic?: string;
 }
 
+// サーバー内のファイルを取得・表示するサブコンポーネント
+function ServerFileBrowser({ onClose, onSelectFile }: { onClose: () => void, onSelectFile: (path: string) => void }) {
+  const [currentPath, setCurrentPath] = useState('');
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const hostname = window.location.hostname;
+
+  const fetchFiles = useCallback(async (path: string) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`http://${hostname}:8000/api/ls?path=${path}`);
+      if (!res.ok) throw new Error('Failed to fetch');
+      const data = await res.json();
+      setItems(data);
+      setCurrentPath(path);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }, [hostname]);
+
+  useEffect(() => {
+    fetchFiles(''); 
+  }, [fetchFiles]);
+
+  const handleItemClick = (item: any) => {
+    if (item.isDirectory) {
+      fetchFiles(item.path);
+    } else {
+      const ext = item.name.split('.').pop()?.toLowerCase();
+      if (['stl', 'dae', 'glb', 'gltf'].includes(ext || '')) {
+        onSelectFile(item.path);
+      } else {
+        alert('配置できるのは3Dモデル形式（.stl, .dae, .glb, .gltf）のみです。');
+      }
+    }
+  };
+
+  const handleGoUp = () => {
+    const parts = currentPath.split('/');
+    parts.pop();
+    fetchFiles(parts.join('/'));
+  };
+
+  return (
+    <div className="absolute inset-0 z-50 bg-black/40 backdrop-blur-sm">
+      <div className="bg-white dark:bg-gray-800 w-96 rounded-xl shadow-2xl flex flex-col overflow-hidden border border-gray-200 dark:border-gray-700">
+      
+        <div className="p-2 bg-gray-100 dark:bg-gray-900 text-[10px] text-gray-500 truncate">
+          Current: /{currentPath}
+        </div>
+
+        <div className="h-full overflow-y-auto p-2">
+          {loading ? (
+            <div className="text-center py-4 text-gray-500">Loading...</div>
+          ) : (
+            <ul className="space-y-1">
+              {currentPath !== '' && (
+                <li 
+                  className="px-3 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer rounded flex items-center gap-2 text-gray-500"
+                  onClick={handleGoUp}
+                >
+                  📁 <span className="font-medium">.. (上の階層へ)</span>
+                </li>
+              )}
+              {items.map((item, idx) => (
+                <li 
+                  key={idx}
+                  className="px-3 py-2 hover:bg-blue-50 dark:hover:bg-blue-900 cursor-pointer rounded flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200"
+                  onClick={() => handleItemClick(item)}
+                >
+                  {item.isDirectory ? '📁' : '📄'} {item.name}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function SimulatorView({ onSceneReady, jointTopic = '/joint_states' }: SimulatorViewProps) {
   const viewerRef = useRef<HTMLElement | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
-  const [rosStatus, setRosStatus] = useState<string>('Disconnected');
+  const [scene, setScene] = useState<THREE.Scene | null>(null); 
+  const [isBrowserOpen, setIsBrowserOpen] = useState(false); 
+  const [isObjectListOpen, setIsObjectListOpen] = useState(false); // 個別削除メニューの開閉状態
 
-  const jointPositionsRef = useRef<Map<string, number>>(new Map());
-  const needsUpdateRef = useRef(false);
+  const { rosStatus, jointPositionsRef, cmdVelRef, needsUpdateRef, publishScan } = useROS(jointTopic); 
+  const { obstacles, addWorldModel, removeObjectById, clearObstacles, exportEnvironment, loadEnvironment } = useWorldManager(scene);
+  const { simulateLidar } = useLidarSim();
 
-  // ★追加: 現在の推定ポーズ（内部で積分して保持する）
-  const currentPoseRef = useRef({
-    x: 0,
-    y: 0,
-    yaw: 0
-  });
+  const currentPoseRef = useRef({ x: 0, y: 0, yaw: 0 });
 
-  // ★追加: cmd_vel の値を保持するRef
-  const cmdVelRef = useRef({
-    linearX: 0,
-    angularZ: 0
-  });
+  const handleServerFileSelect = (filePath: string) => {
+    setIsBrowserOpen(false);
+    const hostname = window.location.hostname;
+    const fileUrl = `http://${hostname}:8000/workspace/${filePath}`;
+    
+    const input = window.prompt("配置する座標を「X, Y, Z」のカンマ区切りで入力してください\n（例: ロボットの前方なら 1.5, 0, 0）", "1.5, 0, 0");
+    if (!input) return;
 
-  // 1. ビューアー初期化 (変更なし)
+    const [x, y, z] = input.split(',').map(Number);
+    if (addWorldModel) {
+      addWorldModel(fileUrl, [x || 0, y || 0, z || 0], [-Math.PI / 2, 0, 0]);
+    }
+  };
+
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const blobUrl = URL.createObjectURL(file);
+    const input = window.prompt("配置する座標を「X, Y, Z」のカンマ区切りで入力してください", "1.5, 0, 0");
+    
+    if (input && addWorldModel) {
+      const [x, y, z] = input.split(',').map(Number);
+      addWorldModel(blobUrl, [x || 0, y || 0, z || 0], [-Math.PI / 2, 0, 0]);
+    }
+    event.target.value = '';
+  };
+
   useEffect(() => {
     const initViewer = async () => {
       try {
@@ -101,6 +205,8 @@ export function SimulatorView({ onSceneReady, jointTopic = '/joint_states' }: Si
                     if (viewer.controls) viewer.controls.update();
                 }
                 if (onSceneReady) onSceneReady(viewer.scene);
+                
+                setScene(viewer.scene);
                 setIsLoaded(true);
             }
         }, 100);
@@ -111,47 +217,14 @@ export function SimulatorView({ onSceneReady, jointTopic = '/joint_states' }: Si
     initViewer();
   }, [onSceneReady]);
 
-
-  // 2. ROS接続 & 運動学計算ループ
   useEffect(() => {
-    const hostname = window.location.hostname;
-    const ros = new ROSLIB.Ros({ url: `ws://${hostname}:9090` });
-    ros.on('connection', () => setRosStatus('Connected'));
-    ros.on('error', () => setRosStatus('Error'));
-    ros.on('close', () => setRosStatus('Disconnected'));
-
-    const jointListener = new ROSLIB.Topic({
-      ros: ros,
-      name: jointTopic,
-      messageType: 'sensor_msgs/msg/JointState'
-    });
-
-    jointListener.subscribe((message: any) => {
-        for (let i = 0; i < message.name.length; i++) {
-            jointPositionsRef.current.set(message.name[i], message.position[i]);
-        }
-        needsUpdateRef.current = true;
-    });
-
-    // ★追加: cmd_vel トピックの購読
-    const cmdVelListener = new ROSLIB.Topic({
-      ros: ros,
-      name: '/cmd_vel',
-      messageType: 'geometry_msgs/msg/Twist'
-    });
-
-    cmdVelListener.subscribe((message: any) => {
-      cmdVelRef.current = {
-        linearX: message.linear.x,
-        angularZ: message.angular.z
-      };
-    });
+    if (!scene) return;
 
     const FPS = 30;
     const INTERVAL = 1000 / FPS;
-
     let animationFrameId: number;
-    let lastTime = performance.now(); // ★変更: dt計算のため高精度タイマーを使用
+    let lastTime = performance.now();
+    let scanCounter = 0; 
 
     const animate = (time: number) => {
         animationFrameId = requestAnimationFrame(animate);
@@ -159,34 +232,33 @@ export function SimulatorView({ onSceneReady, jointTopic = '/joint_states' }: Si
         const delta = time - lastTime;
         if (delta < INTERVAL) return;
         
-        // 経過秒数 (dt)
         const dt = delta / 1000;
         lastTime = time;
 
         const urdfElement = viewerRef.current as any;
         
         if (urdfElement?.robot) {
-            
-            // ★追加: 簡易シミュレーション（運動学の計算）
             const { linearX, angularZ } = cmdVelRef.current;
             const pose = currentPoseRef.current;
 
-            // 向き(yaw)の更新
             pose.yaw += angularZ * dt;
-            // 座標(x, y)の更新 (前進速度を現在の向きに合わせて分解)
             pose.x += linearX * Math.cos(pose.yaw) * dt;
             pose.y += linearX * Math.sin(pose.yaw) * dt;
 
-            // Three.jsのオブジェクトに反映
             urdfElement.robot.position.set(pose.x, pose.y, 0);
-            urdfElement.robot.rotation.z = pose.yaw; // urdf-viewerのup=+Z設定に合わせる
+            urdfElement.robot.rotation.z = pose.yaw;
 
-            // ジョイントの更新処理
             if (urdfElement.robot.joints && needsUpdateRef.current) {
                 jointPositionsRef.current.forEach((position, name) => {
                     const joint = urdfElement.robot.joints[name];
                     if (joint) joint.setJointValue(position);
                 });
+            }
+
+            if (scanCounter++ % 3 === 0) {
+              const meshList = obstacles.map(obj => obj.mesh);
+              const scanData = simulateLidar(urdfElement.robot, meshList);
+              publishScan(scanData);
             }
 
             if (urdfElement.renderer && urdfElement.scene && urdfElement.camera) {
@@ -196,26 +268,117 @@ export function SimulatorView({ onSceneReady, jointTopic = '/joint_states' }: Si
     };
 
     animate(performance.now());
-
-    return () => {
-        cancelAnimationFrame(animationFrameId);
-        jointListener.unsubscribe();
-        cmdVelListener.unsubscribe(); // ★追加
-        ros.close();
-    };
-  }, [jointTopic]); 
-
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [scene, obstacles, cmdVelRef, jointPositionsRef, needsUpdateRef, simulateLidar, publishScan]); 
 
   return (
     <div className="h-full bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg overflow-hidden flex flex-col shadow-sm relative">
-      <div className="bg-gray-100 dark:bg-gray-700 px-4 py-2 border-b border-gray-300 dark:border-gray-600 flex-shrink-0 flex justify-between items-center">
-        <h2 className="text-sm text-gray-700 dark:text-gray-300">メインシミュレータビュー</h2>
-        <div className="text-xs px-2 py-1 rounded bg-white dark:bg-gray-600 shadow-sm">
+      
+      {/* ヘッダー部分 */}
+      <div className="bg-gray-100 dark:bg-gray-700 px-4 py-2 border-b border-gray-300 dark:border-gray-600 flex justify-between items-center z-20">
+        <h2 className="text-sm font-medium text-gray-700 dark:text-gray-300">メインシミュレータビュー</h2>
+        <div className="flex gap-3 items-center">
+          <button 
+            onClick={exportEnvironment}
+            className="text-xs bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded shadow-sm flex items-center transition-colors"
+          >
+            💾 配置を保存
+          </button>
+          <label className="text-xs bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded shadow-sm cursor-pointer transition-all">
+            📂 配置呼び出し
+            <input 
+              type="file" 
+              accept=".json" 
+              className="hidden" 
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                  try {
+                    const json = JSON.parse(event.target?.result as string);
+                    loadEnvironment(json);
+                  } catch (err) {
+                    alert("JSONの解析に失敗しました。");
+                  }
+                };
+                reader.readAsText(file);
+                e.target.value = '';
+              }} 
+            />
+          </label>
+          <div className="text-xs px-2 py-1 rounded bg-white dark:bg-gray-600 shadow-sm border border-gray-200 dark:border-gray-500">
             Status: <span className={rosStatus === 'Connected' ? 'text-green-600 font-bold' : 'text-red-500'}>{rosStatus}</span>
+          </div>
         </div>
       </div>
       
       <div className="flex-1 relative bg-gray-50 overflow-hidden">
+        
+        {/* メイン操作ボタン群（右上） */}
+        <div className="absolute top-4 right-4 z-10 flex flex-col gap-2 items-end">
+
+          <button 
+            onClick={() => setIsBrowserOpen(prev => !prev)}
+            className="bg-white hover:bg-gray-50 dark:bg-gray-700 dark:hover:bg-gray-600 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 px-4 py-2 rounded shadow-md text-xs font-medium transition-colors"
+          >
+            {isBrowserOpen ? "✕ 一覧を閉じる" : "📂 配置するオブジェクトを選択"}
+          </button>
+
+          <button 
+            onClick={() => setIsObjectListOpen(prev => !prev)}
+            className={`px-4 py-2 rounded shadow-md text-xs font-medium transition-colors border ${
+              isObjectListOpen 
+              ? "bg-amber-50 border-amber-200 text-amber-700" 
+              : "bg-white hover:bg-gray-50 border-gray-200 text-gray-700 dark:bg-gray-700 dark:border-gray-600 dark:text-gray-200"
+            }`}
+          >
+            {isObjectListOpen ? "✕ 削除メニューを閉じる" : "✂️ 選択したオブジェクトを削除"}
+          </button>
+
+          <button 
+            onClick={clearObstacles}
+            className="bg-red-50 hover:bg-red-100 border border-red-200 text-red-600 px-4 py-2 rounded shadow-md text-xs font-medium transition-colors mt-2"
+          >
+            🗑️ すべてのオブジェクトを消去
+          </button>
+        </div>
+
+        {/* 個別削除用オーバーレイメニュー */}
+        {isObjectListOpen && (
+          <div className="absolute top-4 left-4 z-30 w-56 bg-white/90 dark:bg-gray-800/90 backdrop-blur border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden">
+
+            <div className="max-h-60 overflow-y-auto p-1">
+              {obstacles.length === 0 ? (
+                <div className="text-[11px] text-gray-400 text-center py-4">配置されたオブジェクトはありません</div>
+              ) : (
+                <ul className="space-y-0.5">
+                  {obstacles.map(obj => (
+                    <li key={obj.id} className="flex justify-between items-center hover:bg-red-50 dark:hover:bg-red-900/20 px-2 py-1.5 rounded transition-colors group">
+                      <span className="text-[11px] truncate text-gray-700 dark:text-gray-300 mr-2">{obj.name}</span>
+                      <button 
+                        onClick={() => removeObjectById(obj.id)}
+                        className="text-gray-300 group-hover:text-red-500 transition-colors px-1"
+                      >
+                        🗑️
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* サーバーファイルブラウザ（オーバーレイ） */}
+        {isBrowserOpen && (
+          <ServerFileBrowser 
+            onClose={() => setIsBrowserOpen(false)} 
+            onSelectFile={handleServerFileSelect} 
+          />
+        )}
+
         <urdf-viewer
           ref={viewerRef}
           up="+Z"
@@ -223,8 +386,8 @@ export function SimulatorView({ onSceneReady, jointTopic = '/joint_states' }: Si
         ></urdf-viewer>
 
         {!isLoaded && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-50 bg-opacity-80">
-            <p className="text-gray-500">Loading...</p>
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-50/80 backdrop-blur-sm z-40">
+            <p className="text-gray-500 font-medium tracking-wide animate-pulse">Loading Simulator...</p>
           </div>
         )}
       </div>

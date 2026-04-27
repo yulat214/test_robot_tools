@@ -80,6 +80,25 @@ app.get('/api/file', (req, res) => {
     }
 });
 
+app.get('/api/convert-sdf', async (req, res) => {
+    const sdfPath = path.join(WORKSPACE_ROOT, req.query.path);
+    const xml = fs.readFileSync(sdfPath, 'utf-8');
+    
+    const parser = new xml2js.Parser();
+    const result = await parser.parseStringPromise(xml);
+
+    const world = result.sdf.world[0];
+    const models = world.model.map(m => {
+        return {
+            name: m.$.name,
+            uri: m.link[0].visual[0].geometry[0].mesh[0].uri[0], // meshのパス
+            pose: m.pose[0].split(' ').map(Number) // [x, y, z, roll, pitch, yaw]
+        };
+    });
+
+    res.json({ objects: models });
+});
+
 app.post('/api/file', (req, res) => {
     try {
         const absPath = getSafeAbsolutePath(req.body.path);
@@ -106,6 +125,7 @@ const staticOptions = {
     }
 };
 app.use('/', express.static(ASSETS_DIR, staticOptions), serveIndex(ASSETS_DIR, {'icons': true}));
+app.use('/workspace', express.static(WORKSPACE_ROOT));
 
 const runningProcesses = [];
 
