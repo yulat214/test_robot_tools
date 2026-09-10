@@ -548,6 +548,10 @@ export function SimulatorView({ onSceneReady, jointTopic = '/joint_states' }: Si
               } else if (ext === 'stl') {
                 const { STLLoader } = await import('three/addons/loaders/STLLoader.js');
                 await new Promise<void>((ok, ng) => new STLLoader().load(meshUrl, geo => { addToGroup(new THREE.Mesh(geo, ghostMat())); ok(); }, undefined, ng));
+              } else if (ext === 'obj') {
+                // ゴーストは材質を ghostMat で上書きするため .mtl は読まない（ジオメトリだけあればよい）
+                const { OBJLoader } = await import('three/addons/loaders/OBJLoader.js');
+                await new Promise<void>((ok, ng) => new OBJLoader().load(meshUrl, r => { addToGroup(r); ok(); }, undefined, ng));
               }
             } catch { /* 個別メッシュ失敗は無視 */ }
           } else {
